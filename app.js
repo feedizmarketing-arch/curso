@@ -6,10 +6,19 @@
   const formatMoney = value => new Intl.NumberFormat('pt-BR', {style:'currency',currency:'BRL',minimumFractionDigits:2}).format(value);
   const promotion = config.promotion || {};
   const normalizeCoupon = value => String(value || '').trim().toUpperCase();
+  const readCoupon = () => { try { return sessionStorage.getItem('growthos_coupon') || ''; } catch { return ''; } };
+  const rememberCoupon = value => { try { value ? sessionStorage.setItem('growthos_coupon',value) : sessionStorage.removeItem('growthos_coupon'); } catch {} };
   let coupon = '';
   const promotionIsActive = () => /^[A-Z0-9]{1,30}$/.test(promotion.code || '') && promotion.discountPercent > 0 && promotion.discountPercent < 100 && Date.now() >= Date.parse(promotion.startsAt) && Date.now() < Date.parse(promotion.endsAt);
   function renderPrice() {
-    if (!promotionIsActive()) coupon = '';
+    if (!promotionIsActive()) {
+      const wasApplied = Boolean(coupon);
+      coupon = ''; rememberCoupon('');
+      if (wasApplied) {
+        const status = document.getElementById('coupon-message');
+        if (status) status.textContent = 'A promoção encerrou. Confira o preço atualizado antes de continuar.';
+      }
+    }
     price = coupon ? Math.round(regularPrice * (100 - promotion.discountPercent)) / 100 : regularPrice;
     document.querySelectorAll('.price').forEach(el => { el.textContent = formatMoney(price); });
     document.querySelectorAll('[data-price-number]').forEach(el => { el.textContent = price.toLocaleString('pt-BR',{minimumFractionDigits:2}); });
@@ -17,18 +26,33 @@
     document.querySelectorAll('[data-promo-applied]').forEach(el => { el.hidden = !coupon; });
     document.querySelectorAll('[data-promo-date]').forEach(el => { el.textContent = promotion.dateLabel || ''; });
     document.querySelectorAll('[data-promo-available]').forEach(el => { el.hidden = !promotionIsActive(); });
+    document.querySelectorAll('[data-promo-unapplied]').forEach(el => { el.hidden = !promotionIsActive() || Boolean(coupon); });
+    document.querySelectorAll('[data-discount-price]').forEach(el => { el.textContent = formatMoney(Math.round(regularPrice * (100 - promotion.discountPercent)) / 100); });
+    const claim = document.getElementById('claim-coupon');
+    if (claim) claim.disabled = !promotionIsActive();
+    if (!promotionIsActive()) {
+      const claimMessage = document.getElementById('claim-message');
+      if (claimMessage) claimMessage.textContent = 'A promoção de lançamento encerrou. O curso continua disponível pelo preço normal.';
+    }
     const remove = document.getElementById('coupon-remove');
     if (remove) remove.hidden = !coupon;
   }
   function applyCoupon(value) {
     const valid = promotionIsActive() && normalizeCoupon(value) === promotion.code;
     coupon = valid ? promotion.code : '';
+    rememberCoupon(coupon);
+    try {
+      const current = new URL(location.href);
+      if (coupon) current.searchParams.set('coupon',coupon); else current.searchParams.delete('coupon');
+      history.replaceState(null,'',current);
+    } catch {}
     renderPrice();
     const message = document.getElementById('coupon-message');
     if (message) message.textContent = valid ? `Cupom ${coupon} aplicado. Total: ${formatMoney(price)}.` : 'Cupom não reconhecido ou fora da validade. Confira o código.';
     return valid;
   }
-  const incomingCoupon = new URLSearchParams(location.search).get('coupon');
+  const searchCoupon = new URLSearchParams(location.search);
+  const incomingCoupon = searchCoupon.has('coupon') ? searchCoupon.get('coupon') : readCoupon();
   if (incomingCoupon) applyCoupon(incomingCoupon);
   renderPrice();
   const couponForm = document.getElementById('coupon-form');
@@ -39,7 +63,7 @@
     couponForm.addEventListener('submit', event => { event.preventDefault(); applyCoupon(input?.value); });
   }
   document.getElementById('coupon-remove')?.addEventListener('click', () => {
-    coupon = ''; renderPrice();
+    coupon = ''; rememberCoupon(''); renderPrice();
     document.getElementById('coupon-code').value = '';
     document.getElementById('coupon-message').textContent = 'Cupom removido. Preço normal restaurado.';
   });
@@ -49,7 +73,7 @@
   let preference = read('growthos_marketing');
   let pixelStarted = false;
   function openDialog(dialog) {
-    if (!dialog) return;
+    if (!dialog || dialog.open) return;
     if (typeof dialog.showModal === 'function') dialog.showModal();
     else dialog.setAttribute('open','');
   }
@@ -72,6 +96,59 @@
     document.getElementById('image-caption').textContent = caption;
     openDialog(document.getElementById('image-dialog'));
   }));
+  document.querySelectorAll('[data-get-coupon]').forEach(button => button.addEventListener('click', () => {
+    renderPrice();
+    if (promotionIsActive()) openDialog(document.getElementById('coupon-dialog'));
+    else document.getElementById('oferta')?.scrollIntoView({block:'start'});
+  }));
+  document.getElementById('claim-coupon')?.addEventListener('click', () => {
+    if (!applyCoupon(promotion.code)) return;
+    const input = document.getElementById('coupon-code');
+    if (input) input.value = coupon;
+    closeDialog(document.getElementById('coupon-dialog'));
+    document.getElementById('offer-card')?.scrollIntoView({block:'start',behavior:'smooth'});
+    const url = new URL(location.href);
+    url.searchParams.set('coupon',coupon);
+    try { history.replaceState(null,'',url); } catch {}
+  });
+  document.getElementById('coupon-remove')?.addEventListener('click', () => {
+    const url = new URL(location.href); url.searchParams.delete('coupon');
+    try { history.replaceState(null,'',url); } catch {}
+  });
+  const videoDialog = document.getElementById('video-dialog');
+  const videoPlayer = document.getElementById('video-player');
+  const approvedVideos = new Set(['Z44EnyTnUDY','0084bYulTM4','vipSdIdimD4','1gv34vINJhg','Yi520kPzUoQ']);
+  document.querySelectorAll('[data-video]').forEach(link => link.addEventListener('click', event => {
+    const id = link.dataset.video;
+    if (!approvedVideos.has(id) || !videoPlayer || !videoDialog) return;
+    event.preventDefault();
+    const title = `Depoimento de ${link.dataset.videoName || 'participante'}`;
+    document.getElementById('video-title').textContent = title;
+    document.getElementById('video-external').href = `https://www.youtube.com/watch?v=${id}`;
+    const frame = document.createElement('iframe');
+    frame.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
+    frame.title = title;
+    frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+    frame.allowFullscreen = true;
+    frame.referrerPolicy = 'strict-origin-when-cross-origin';
+    videoPlayer.replaceChildren(frame);
+    openDialog(videoDialog);
+  }));
+  videoDialog?.addEventListener('close', () => videoPlayer?.replaceChildren());
+  document.querySelectorAll('[data-scroll-rail]').forEach(button => button.addEventListener('click', () => {
+    const rail = document.querySelector('.testimonial-rail');
+    if (rail) rail.scrollBy({left:Number(button.dataset.scrollRail) * rail.clientWidth * .85,behavior:'smooth'});
+  }));
+  function updateDeadline() {
+    const remaining = Date.parse(promotion.endsAt) - Date.now();
+    if (!promotionIsActive()) { renderPrice(); return; }
+    const minutes = Math.max(0,Math.floor(remaining/60000));
+    const days = Math.floor(minutes / 1440);
+    const hours = Math.floor((minutes % 1440)/60);
+    document.querySelectorAll('[data-countdown]').forEach(el => { el.textContent = `O desconto encerra em ${days}d ${hours}h ${minutes % 60}min.`; });
+  }
+  updateDeadline();
+  setInterval(updateDeadline,30000);
   document.getElementById('privacy-open')?.addEventListener('click', () => openDialog(document.getElementById('privacy-dialog')));
   try {
     const canonical = new URL(config.canonicalUrl);
