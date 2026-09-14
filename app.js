@@ -1,10 +1,49 @@
 (() => {
   'use strict';
   const config = window.GROWTHOS_CONFIG || {};
-  const price = Number.isFinite(config.price) && config.price > 0 ? config.price : 47;
-  const money = new Intl.NumberFormat('pt-BR', {style:'currency',currency:'BRL',maximumFractionDigits:Number.isInteger(price)?0:2}).format(price);
-  document.querySelectorAll('.price').forEach(el => { el.textContent = money; });
-  document.querySelectorAll('[data-price-number]').forEach(el => { el.textContent = price.toLocaleString('pt-BR'); });
+  const regularPrice = Number.isFinite(config.price) && config.price > 0 ? config.price : 47.90;
+  let price = regularPrice;
+  const formatMoney = value => new Intl.NumberFormat('pt-BR', {style:'currency',currency:'BRL',minimumFractionDigits:2}).format(value);
+  const promotion = config.promotion || {};
+  const normalizeCoupon = value => String(value || '').trim().toUpperCase();
+  let coupon = '';
+  const promotionIsActive = () => /^[A-Z0-9]{1,30}$/.test(promotion.code || '') && promotion.discountPercent > 0 && promotion.discountPercent < 100 && Date.now() >= Date.parse(promotion.startsAt) && Date.now() < Date.parse(promotion.endsAt);
+  function renderPrice() {
+    if (!promotionIsActive()) coupon = '';
+    price = coupon ? Math.round(regularPrice * (100 - promotion.discountPercent)) / 100 : regularPrice;
+    document.querySelectorAll('.price').forEach(el => { el.textContent = formatMoney(price); });
+    document.querySelectorAll('[data-price-number]').forEach(el => { el.textContent = price.toLocaleString('pt-BR',{minimumFractionDigits:2}); });
+    document.querySelectorAll('[data-regular-price]').forEach(el => { el.textContent = formatMoney(regularPrice); });
+    document.querySelectorAll('[data-promo-applied]').forEach(el => { el.hidden = !coupon; });
+    document.querySelectorAll('[data-promo-date]').forEach(el => { el.textContent = promotion.dateLabel || ''; });
+    document.querySelectorAll('[data-promo-available]').forEach(el => { el.hidden = !promotionIsActive(); });
+    const remove = document.getElementById('coupon-remove');
+    if (remove) remove.hidden = !coupon;
+  }
+  function applyCoupon(value) {
+    const valid = promotionIsActive() && normalizeCoupon(value) === promotion.code;
+    coupon = valid ? promotion.code : '';
+    renderPrice();
+    const message = document.getElementById('coupon-message');
+    if (message) message.textContent = valid ? `Cupom ${coupon} aplicado. Total: ${formatMoney(price)}.` : 'Cupom não reconhecido ou fora da validade. Confira o código.';
+    return valid;
+  }
+  const incomingCoupon = new URLSearchParams(location.search).get('coupon');
+  if (incomingCoupon) applyCoupon(incomingCoupon);
+  renderPrice();
+  const couponForm = document.getElementById('coupon-form');
+  if (couponForm) {
+    couponForm.hidden = false;
+    const input = document.getElementById('coupon-code');
+    if (input && coupon) input.value = coupon;
+    couponForm.addEventListener('submit', event => { event.preventDefault(); applyCoupon(input?.value); });
+  }
+  document.getElementById('coupon-remove')?.addEventListener('click', () => {
+    coupon = ''; renderPrice();
+    document.getElementById('coupon-code').value = '';
+    document.getElementById('coupon-message').textContent = 'Cupom removido. Preço normal restaurado.';
+  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) renderPrice(); });
   const read = key => { try { return localStorage.getItem(key); } catch { return null; } };
   const save = (key,value) => { try { localStorage.setItem(key,value); } catch {} };
   let preference = read('growthos_marketing');
@@ -82,10 +121,18 @@
         const value = params.get(key);
         if (value && value.length <= 500) url.searchParams.set(key,value);
       });
+      url.searchParams.delete('coupon');
+      if (coupon && promotionIsActive()) url.searchParams.set('coupon',coupon);
       return url.href;
     } catch { return null; }
   }
   document.querySelectorAll('[data-buy]').forEach(button => button.addEventListener('click', () => {
+    if (coupon && !promotionIsActive()) {
+      renderPrice();
+      const message = document.getElementById('coupon-message');
+      if (message) { message.textContent = 'A promoção encerrou. O preço foi atualizado. Confira o valor antes de continuar.'; message.scrollIntoView({block:'center'}); }
+      return;
+    }
     const checkout = buildCheckoutUrl(config.checkoutUrl,location.search);
     if (config.checkoutReady !== true || !checkout) { openDialog(document.getElementById('availability-dialog')); return; }
     if (pixelStarted && preference === 'yes' && window.fbq) window.fbq('trackCustom','CheckoutClick',{content_name:'GrowthOS — Marketing que Vende',value:price,currency:'BRL'});
