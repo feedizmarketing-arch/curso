@@ -1,2 +1,2 @@
-/* Oferta publicada: valor e entrega conferidos na Kiwify. */
-window.GROWTHOS_CONFIG = Object.freeze({price:47.90, checkoutUrl:'https://pay.kiwify.com.br/xQxZtk8', checkoutReady:true, canonicalUrl:'https://www.douglasmaronese.com.br/', trackingEnabled:true, metaPixelId:'1647917723222903', promotion:Object.freeze({code:'FEEDIZ', discountPercent:63, startsAt:'2026-09-14T04:00:00Z', endsAt:'2026-09-21T23:59:00Z', dateLabel:'21/09/2026'})});
+/* Oferta direta; links promocionais já divulgados respeitam a validade original. */
+window.GROWTHOS_CONFIG = Object.freeze({price:47.90, checkoutUrl:'https://pay.kiwify.com.br/xQxZtk8', checkoutReady:true, canonicalUrl:'https://www.douglasmaronese.com.br/', trackingEnabled:true, metaPixelId:'2080447342840282', offerVersion:'20260915-direta', promotion:Object.freeze({code:'FEEDIZ', discountPercent:63, startsAt:'2026-09-14T04:00:00Z', endsAt:'2026-09-21T23:59:00Z', dateLabel:'21/09/2026'})});

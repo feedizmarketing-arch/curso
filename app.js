@@ -1,73 +1,34 @@
 (() => {
   'use strict';
   const config = window.GROWTHOS_CONFIG || {};
+  const measurementEnabled = config.trackingEnabled === true && location.hostname === 'www.douglasmaronese.com.br' && !new URLSearchParams(location.search).has('qa');
   const regularPrice = Number.isFinite(config.price) && config.price > 0 ? config.price : 47.90;
   let price = regularPrice;
-  const formatMoney = value => new Intl.NumberFormat('pt-BR', {style:'currency',currency:'BRL',minimumFractionDigits:2}).format(value);
+  const formatMoney = value => new Intl.NumberFormat('pt-BR', {style:'currency',currency:'BRL'}).format(value);
   const promotion = config.promotion || {};
-  const normalizeCoupon = value => String(value || '').trim().toUpperCase();
-  const readCoupon = () => { try { return sessionStorage.getItem('growthos_coupon') || ''; } catch { return ''; } };
-  const rememberCoupon = value => { try { value ? sessionStorage.setItem('growthos_coupon',value) : sessionStorage.removeItem('growthos_coupon'); } catch {} };
+  // Explicit legacy links only. A stored coupon must not silently change the new offer.
+  const requestedCoupon = (new URLSearchParams(location.search).get('coupon') || '').trim().toUpperCase();
+  const promotionIsActive = () => requestedCoupon === promotion.code && promotion.discountPercent > 0 && promotion.discountPercent < 100 && Date.now() >= Date.parse(promotion.startsAt) && Date.now() < Date.parse(promotion.endsAt);
   let coupon = '';
-  const promotionIsActive = () => /^[A-Z0-9]{1,30}$/.test(promotion.code || '') && promotion.discountPercent > 0 && promotion.discountPercent < 100 && Date.now() >= Date.parse(promotion.startsAt) && Date.now() < Date.parse(promotion.endsAt);
+  try { sessionStorage.removeItem('growthos_coupon'); } catch {}
   function renderPrice() {
-    if (!promotionIsActive()) {
-      const wasApplied = Boolean(coupon);
-      coupon = ''; rememberCoupon('');
-      if (wasApplied) {
-        const status = document.getElementById('coupon-message');
-        if (status) status.textContent = 'A promoção encerrou. Confira o preço atualizado antes de continuar.';
-      }
-    }
-    price = coupon ? Math.round(regularPrice * (100 - promotion.discountPercent)) / 100 : regularPrice;
+    coupon = promotionIsActive() ? promotion.code : '';
+    price = coupon ? Math.round(regularPrice * (100-promotion.discountPercent))/100 : regularPrice;
     document.querySelectorAll('.price').forEach(el => { el.textContent = formatMoney(price); });
     document.querySelectorAll('[data-price-number]').forEach(el => { el.textContent = price.toLocaleString('pt-BR',{minimumFractionDigits:2}); });
-    document.querySelectorAll('[data-regular-price]').forEach(el => { el.textContent = formatMoney(regularPrice); });
-    document.querySelectorAll('[data-promo-applied]').forEach(el => { el.hidden = !coupon; });
-    document.querySelectorAll('[data-promo-date]').forEach(el => { el.textContent = promotion.dateLabel || ''; });
-    document.querySelectorAll('[data-promo-available]').forEach(el => { el.hidden = !promotionIsActive(); });
-    document.querySelectorAll('[data-promo-unapplied]').forEach(el => { el.hidden = !promotionIsActive() || Boolean(coupon); });
-    document.querySelectorAll('[data-discount-price]').forEach(el => { el.textContent = formatMoney(Math.round(regularPrice * (100 - promotion.discountPercent)) / 100); });
-    const claim = document.getElementById('claim-coupon');
-    if (claim) claim.disabled = !promotionIsActive();
-    if (!promotionIsActive()) {
-      const claimMessage = document.getElementById('claim-message');
-      if (claimMessage) claimMessage.textContent = 'A promoção de lançamento encerrou. O curso continua disponível pelo preço normal.';
+    const notice = document.getElementById('legacy-price');
+    if (notice) {
+      notice.hidden = !requestedCoupon;
+      notice.textContent = coupon ? `Condição já divulgada: ${coupon} aplicado. Total ${formatMoney(price)}. Válido até ${promotion.dateLabel}.` : 'Confira a oferta atual: o código deste link não está ativo.';
     }
-    const remove = document.getElementById('coupon-remove');
-    if (remove) remove.hidden = !coupon;
+    document.querySelectorAll('[data-buy]').forEach(link => {
+      const checkout = buildCheckoutUrl(config.checkoutUrl,location.search);
+      if (checkout && link.tagName === 'A') link.href = checkout;
+    });
   }
-  function applyCoupon(value) {
-    const valid = promotionIsActive() && normalizeCoupon(value) === promotion.code;
-    coupon = valid ? promotion.code : '';
-    rememberCoupon(coupon);
-    try {
-      const current = new URL(location.href);
-      if (coupon) current.searchParams.set('coupon',coupon); else current.searchParams.delete('coupon');
-      history.replaceState(null,'',current);
-    } catch {}
-    renderPrice();
-    const message = document.getElementById('coupon-message');
-    if (message) message.textContent = valid ? `Cupom ${coupon} aplicado. Total: ${formatMoney(price)}.` : 'Cupom não reconhecido ou fora da validade. Confira o código.';
-    return valid;
-  }
-  const searchCoupon = new URLSearchParams(location.search);
-  const incomingCoupon = searchCoupon.has('coupon') ? searchCoupon.get('coupon') : readCoupon();
-  if (incomingCoupon) applyCoupon(incomingCoupon);
   renderPrice();
-  const couponForm = document.getElementById('coupon-form');
-  if (couponForm) {
-    couponForm.hidden = false;
-    const input = document.getElementById('coupon-code');
-    if (input && coupon) input.value = coupon;
-    couponForm.addEventListener('submit', event => { event.preventDefault(); applyCoupon(input?.value); });
-  }
-  document.getElementById('coupon-remove')?.addEventListener('click', () => {
-    coupon = ''; rememberCoupon(''); renderPrice();
-    document.getElementById('coupon-code').value = '';
-    document.getElementById('coupon-message').textContent = 'Cupom removido. Preço normal restaurado.';
-  });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) renderPrice(); });
+  setInterval(renderPrice,30000);
   const read = key => { try { return localStorage.getItem(key); } catch { return null; } };
   const save = (key,value) => { try { localStorage.setItem(key,value); } catch {} };
   let preference = read('growthos_marketing');
@@ -96,25 +57,6 @@
     document.getElementById('image-caption').textContent = caption;
     openDialog(document.getElementById('image-dialog'));
   }));
-  document.querySelectorAll('[data-get-coupon]').forEach(button => button.addEventListener('click', () => {
-    renderPrice();
-    if (promotionIsActive()) openDialog(document.getElementById('coupon-dialog'));
-    else document.getElementById('oferta')?.scrollIntoView({block:'start'});
-  }));
-  document.getElementById('claim-coupon')?.addEventListener('click', () => {
-    if (!applyCoupon(promotion.code)) return;
-    const input = document.getElementById('coupon-code');
-    if (input) input.value = coupon;
-    closeDialog(document.getElementById('coupon-dialog'));
-    document.getElementById('offer-card')?.scrollIntoView({block:'start',behavior:'smooth'});
-    const url = new URL(location.href);
-    url.searchParams.set('coupon',coupon);
-    try { history.replaceState(null,'',url); } catch {}
-  });
-  document.getElementById('coupon-remove')?.addEventListener('click', () => {
-    const url = new URL(location.href); url.searchParams.delete('coupon');
-    try { history.replaceState(null,'',url); } catch {}
-  });
   const videoDialog = document.getElementById('video-dialog');
   const videoPlayer = document.getElementById('video-player');
   const approvedVideos = new Set(['Z44EnyTnUDY','0084bYulTM4','vipSdIdimD4','1gv34vINJhg','Yi520kPzUoQ']);
@@ -139,16 +81,6 @@
     const rail = document.querySelector('.testimonial-rail');
     if (rail) rail.scrollBy({left:Number(button.dataset.scrollRail) * rail.clientWidth * .85,behavior:'smooth'});
   }));
-  function updateDeadline() {
-    const remaining = Date.parse(promotion.endsAt) - Date.now();
-    if (!promotionIsActive()) { renderPrice(); return; }
-    const minutes = Math.max(0,Math.floor(remaining/60000));
-    const days = Math.floor(minutes / 1440);
-    const hours = Math.floor((minutes % 1440)/60);
-    document.querySelectorAll('[data-countdown]').forEach(el => { el.textContent = `O desconto encerra em ${days}d ${hours}h ${minutes % 60}min.`; });
-  }
-  updateDeadline();
-  setInterval(updateDeadline,30000);
   document.getElementById('privacy-open')?.addEventListener('click', () => openDialog(document.getElementById('privacy-dialog')));
   try {
     const canonical = new URL(config.canonicalUrl);
@@ -160,7 +92,7 @@
     }
   } catch {}
   function startPixel() {
-    if (pixelStarted || preference !== 'yes' || config.trackingEnabled !== true || !/^\d+$/.test(String(config.metaPixelId || '')) || location.protocol === 'file:') return;
+    if (pixelStarted || preference !== 'yes' || !measurementEnabled || !/^\d+$/.test(String(config.metaPixelId || '')) || location.protocol === 'file:') return;
     pixelStarted = true;
     if (!window.fbq) {
       const fbq = function(){ fbq.callMethod ? fbq.callMethod.apply(fbq,arguments) : fbq.queue.push(arguments); };
@@ -174,7 +106,7 @@
     window.fbq('track','ViewContent',{content_name:'GrowthOS — Marketing que Vende',content_type:'product',value:price,currency:'BRL'});
   }
   const cookieBar = document.getElementById('cookie-bar');
-  if (cookieBar && config.trackingEnabled === true && !['yes','no'].includes(preference)) cookieBar.hidden = false;
+  if (cookieBar && measurementEnabled && !['yes','no'].includes(preference)) cookieBar.hidden = false;
   let toastTimer;
   document.querySelectorAll('[data-consent]').forEach(button => button.addEventListener('click', () => {
     preference = button.dataset.consent === 'yes' ? 'yes' : 'no';
@@ -203,18 +135,39 @@
       return url.href;
     } catch { return null; }
   }
-  document.querySelectorAll('[data-buy]').forEach(button => button.addEventListener('click', () => {
+  document.querySelectorAll('[data-buy]').forEach(button => button.addEventListener('click', event => {
+    event.preventDefault();
     if (coupon && !promotionIsActive()) {
       renderPrice();
-      const message = document.getElementById('coupon-message');
+      const message = document.getElementById('legacy-price');
       if (message) { message.textContent = 'A promoção encerrou. O preço foi atualizado. Confira o valor antes de continuar.'; message.scrollIntoView({block:'center'}); }
       return;
     }
     const checkout = buildCheckoutUrl(config.checkoutUrl,location.search);
     if (config.checkoutReady !== true || !checkout) { openDialog(document.getElementById('availability-dialog')); return; }
-    if (pixelStarted && preference === 'yes' && window.fbq) window.fbq('trackCustom','CheckoutClick',{content_name:'GrowthOS — Marketing que Vende',value:price,currency:'BRL'});
+    if (pixelStarted && preference === 'yes' && window.fbq) window.fbq('trackCustom','CheckoutClick',{content_name:'GrowthOS — Marketing que Vende',value:price,currency:'BRL',offer_version:config.offerVersion || 'direct'});
     window.location.assign(checkout);
   }));
+
+  // Sample from the delivered prompt collection. No user-entered text is sent to analytics.
+  document.getElementById('sample-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    const product = document.getElementById('sample-product').value.trim();
+    const audience = document.getElementById('sample-audience').value.trim();
+    const delivery = document.getElementById('sample-delivery').value.trim();
+    if (!product || !audience || !delivery) return;
+    const output = document.getElementById('sample-output');
+    output.value = 'CONTEXTO DO MEU NEGÓCIO\nProduto ou serviço: ' + product + '\nPúblico e situação: ' + audience + '\nEntrega confirmada: ' + delivery + '\n\nCOMANDO\n' + "Crie 5 versões de uma frase de oferta contendo produto, público ou situação de uso, benefício principal e condição comercial confirmada. Use até 25 palavras por versão. Evite garantias de resultado, superlativos vazios e urgência inventada. Escolha a mais clara e explique o motivo em duas linhas.";
+    document.getElementById('sample-result').hidden = false;
+    document.getElementById('sample-result').scrollIntoView({block:'center',behavior:'smooth'});
+    if (pixelStarted && preference === 'yes' && window.fbq) window.fbq('trackCustom','SampleUsed',{sample:'prompt_05',offer_version:config.offerVersion});
+  });
+  document.getElementById('sample-copy')?.addEventListener('click', async () => {
+    const output = document.getElementById('sample-output');
+    const status = document.getElementById('sample-status');
+    try { await navigator.clipboard.writeText(output.value); status.textContent = 'Copiado. Cole na ferramenta de IA que você usa e revise a resposta.'; }
+    catch { output.focus(); output.select(); status.textContent = 'Selecione e copie o texto acima.'; }
+  });
   const sticky = document.getElementById('mobile-sticky');
   const hero = document.getElementById('hero-copy');
   const offer = document.getElementById('offer-card');
